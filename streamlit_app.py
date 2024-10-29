@@ -1,16 +1,22 @@
+#this is na code for upto getting response. VB bot
+
+import os
 import re
 import numpy as np
 import streamlit as st
-from typing import List, Dict, Optional
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
-from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings
+from typing import List, Dict
+from dotenv import load_dotenv
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.chains import ConversationalRetrievalChain
 from langchain.schema import Document, BaseRetriever
 from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from tenacity import retry, stop_after_attempt, wait_fixed
 from pydantic import Field
+
+# Load environment variables
+load_dotenv()
 
 # Configuration
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
@@ -58,20 +64,9 @@ class CustomRetriever(BaseRetriever):
     class Config:
         arbitrary_types_allowed = True
 
-    @classmethod
-    def from_params(cls, db_url: str, category: str = "all") -> "CustomRetriever":
-        """Factory method to create CustomRetriever instance"""
-        return cls(
-            db_url=db_url,
-            category=category,
-            embeddings=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-        )
-
-    def __init__(self, db_url: str, category: str = "all", embeddings: Optional[OpenAIEmbeddings] = None):
-        super().__init__()
-        self.db_url = db_url
-        self.category = category
-        self.embeddings = embeddings or OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    def __init__(self, db_url: str, category: str = "all"):
+        super().__init__(db_url=db_url, category=category)
+        self.embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
     def format_vector_for_postgres(self, embedding):
         """Format embeddings for PostgreSQL"""
@@ -123,6 +118,28 @@ class CustomRetriever(BaseRetriever):
 
     async def aget_relevant_documents(self, query: str) -> List[Document]:
         return self.get_relevant_documents(query)
+
+def get_similar_recipes(ingredients: str, limit: int = 5) -> List[Dict]:
+    """Find recipes with similar ingredients"""
+    try:
+        conn = psycopg2.connect(NEON_DB_URL)
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = """
+                SELECT DISTINCT ON (chunk_id) 
+                    chunk_id, text, url, ingredients
+                FROM transcripts
+                WHERE ingredients IS NOT NULL
+                AND ingredients ILIKE %s
+                LIMIT %s;
+            """
+            ingredients_filter = f"%{ingredients}%"
+            cur.execute(sql, (ingredients_filter, limit))
+            results = cur.fetchall()
+        conn.close()
+        return results
+    except Exception as e:
+        st.error(f"Error finding similar recipes: {str(e)}")
+        return []
 
 def process_ai_response(response: str) -> str:
     """Process and format AI response with emojis and combine ingredients"""
@@ -204,7 +221,7 @@ def initialize_session_state():
     if 'selected_category' not in st.session_state:
         st.session_state.selected_category = "all"
     if 'retriever' not in st.session_state:
-        st.session_state.retriever = CustomRetriever.from_params(NEON_DB_URL)
+        st.session_state.retriever = CustomRetriever(NEON_DB_URL)
 
 def main():
     # Page configuration
@@ -232,7 +249,7 @@ def main():
 
         if selected_category != st.session_state.selected_category:
             st.session_state.selected_category = selected_category
-            st.session_state.retriever = CustomRetriever.from_params(NEON_DB_URL, selected_category)
+            st.session_state.retriever = CustomRetriever(NEON_DB_URL, selected_category)
         
         st.markdown("---")
         st.markdown("""
@@ -299,6 +316,35 @@ def main():
                     st.markdown(f"**You:** {message}")
                 else:
                     st.markdown(f"**Chef VB Assistant:** {message}")
+
+            # Display relevant video sections
+            if result['source_documents']:
+                st.markdown("### 📺 Related Video Sections")
+                for doc in result['source_documents']:
+                    with st.expander(f"Video Section - {doc.metadata['chunk_id']}"):
+                        if doc.metadata['url']:
+                            st.video(doc.metadata['url'])
+                        st.markdown("### 📝 Transcript")
+                        st.write(doc.page_content)
+                        if doc.metadata['ingredients']:
+                            st.markdown("### 📋 Ingredients Mentioned")
+                            st.write(doc.metadata['ingredients'])
+                        st.markdown(f"Relevance Score: {doc.metadata['similarity']:.2%}")
+
+                # Find and display similar recipes
+                if doc.metadata['ingredients']:
+                    similar_recipes = get_similar_recipes(doc.metadata['ingredients'])
+                    if similar_recipes:
+                        st.markdown("### 👨‍🍳 Similar Recipes You Might Like")
+                        for recipe in similar_recipes:
+                            with st.expander(f"View Recipe from {recipe['chunk_id']}"):
+                                if recipe['url']:
+                                    st.video(recipe['url'])
+                                st.markdown("### 📝 Recipe Details")
+                                st.write(recipe['text'])
+                                if recipe['ingredients']:
+                                    st.markdown("### 📋 Ingredients")
+                                    st.write(recipe['ingredients'])
 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
