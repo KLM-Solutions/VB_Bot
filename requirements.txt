@@ -8,13 +8,7 @@ tenacity
 pydantic
 python-dotenv
 typing-extensions
-re
-asyncio
 aiohttp
 python-multipart
-typing
-setuptools
-wheel
-pip
 redis
 tiktoken
