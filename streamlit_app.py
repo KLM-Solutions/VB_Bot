@@ -1,9 +1,7 @@
-import os
 import re
 import numpy as np
 import streamlit as st
-from typing import List, Dict
-from dotenv import load_dotenv
+from typing import List, Dict, Optional
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.schema import Document, BaseRetriever
@@ -13,12 +11,9 @@ from psycopg2.extras import RealDictCursor
 from tenacity import retry, stop_after_attempt, wait_fixed
 from pydantic import Field
 
-# Load environment variables
-load_dotenv()
-
 # Configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-NEON_DB_URL = os.getenv("NEON_DB_URL")
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+NEON_DB_URL = st.secrets["NEON_DB_URL"]
 
 # Categories for content filtering
 CONTENT_CATEGORIES = {
@@ -62,9 +57,20 @@ class CustomRetriever(BaseRetriever):
     class Config:
         arbitrary_types_allowed = True
 
-    def __init__(self, db_url: str, category: str = "all"):
-        super().__init__(db_url=db_url, category=category)
-        self.embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    @classmethod
+    def from_params(cls, db_url: str, category: str = "all") -> "CustomRetriever":
+        """Factory method to create CustomRetriever instance"""
+        return cls(
+            db_url=db_url,
+            category=category,
+            embeddings=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+        )
+
+    def __init__(self, db_url: str, category: str = "all", embeddings: Optional[OpenAIEmbeddings] = None):
+        super().__init__()
+        self.db_url = db_url
+        self.category = category
+        self.embeddings = embeddings or OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
     def format_vector_for_postgres(self, embedding):
         """Format embeddings for PostgreSQL"""
@@ -197,7 +203,7 @@ def initialize_session_state():
     if 'selected_category' not in st.session_state:
         st.session_state.selected_category = "all"
     if 'retriever' not in st.session_state:
-        st.session_state.retriever = CustomRetriever(NEON_DB_URL)
+        st.session_state.retriever = CustomRetriever.from_params(NEON_DB_URL)
 
 def main():
     # Page configuration
@@ -225,7 +231,7 @@ def main():
 
         if selected_category != st.session_state.selected_category:
             st.session_state.selected_category = selected_category
-            st.session_state.retriever = CustomRetriever(NEON_DB_URL, selected_category)
+            st.session_state.retriever = CustomRetriever.from_params(NEON_DB_URL, selected_category)
         
         st.markdown("---")
         st.markdown("""
