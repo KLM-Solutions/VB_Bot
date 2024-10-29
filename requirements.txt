@@ -8,3 +8,4 @@ langchain
 langchain-community
 openai
 langchain-openai
+langchain-core
