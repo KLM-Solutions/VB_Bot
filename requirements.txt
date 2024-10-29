@@ -1,0 +1,9 @@
+langchain-openai
+openai
+streamlit
+numpy
+python-dotenv
+psycopg2-binary
+tenacity
+pydantic
+langchain
