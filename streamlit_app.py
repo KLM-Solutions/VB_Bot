@@ -2,8 +2,9 @@ import re
 import numpy as np
 import streamlit as st
 from typing import List, Dict, Optional
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.chains import ConversationalRetrievalChain
+from langchain_community.chains import ConversationalRetrievalChain
+from langchain_community.chat_models import ChatOpenAI
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.schema import Document, BaseRetriever
 from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 import psycopg2
