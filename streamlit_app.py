@@ -2,7 +2,7 @@ import re
 import numpy as np
 import streamlit as st
 from typing import List, Dict, Optional
-from langchain_community.chains import ConversationalRetrievalChain
+from langchain.chains import ConversationalRetrievalChain
 from langchain_community.chat_models import ChatOpenAI
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.schema import Document, BaseRetriever
