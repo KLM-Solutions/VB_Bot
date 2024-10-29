@@ -1,6 +1,7 @@
 streamlit
 numpy
 langchain
+langchain.chains.conversational_retrieval
 langchain-openai
 openai
 psycopg2-binary
