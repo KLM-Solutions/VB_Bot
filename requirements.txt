@@ -7,3 +7,4 @@ pydantic
 langchain
 langchain-community
 openai
+langchain-openai
