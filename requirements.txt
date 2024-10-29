@@ -7,3 +7,4 @@ psycopg2-binary
 tenacity
 pydantic
 langchain
+langchain_community
