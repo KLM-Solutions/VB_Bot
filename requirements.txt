@@ -1,10 +1,9 @@
-langchain-openai
-openai
-streamlit
 numpy
+streamlit
 python-dotenv
 psycopg2-binary
 tenacity
 pydantic
 langchain
-langchain_community
+langchain-community
+openai
