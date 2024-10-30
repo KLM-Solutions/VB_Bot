@@ -275,7 +275,7 @@ def main():
 
     # Main chat interface
     st.markdown("### Ask about recipes, techniques, or kitchen tips! 💬")
-    user_input = st.text_input("Your question:", key="user_input", value="")
+    user_input = st.text_input("Your question:", key="user_input")
 
     # Handle user input
     if user_input and user_input != st.session_state.get('last_input', ''):
@@ -324,9 +324,6 @@ def main():
                 st.markdown("### 📺 Related Video")
                 if result['source_documents'][0].metadata['url']:
                     st.video(result['source_documents'][0].metadata['url'])
-
-            # Clear the input box after processing
-            st.session_state.user_input = ""
 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
