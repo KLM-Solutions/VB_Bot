@@ -1,5 +1,3 @@
-#this is na code for upto getting response. VB bot
-
 import os
 import re
 import numpy as np
@@ -14,6 +12,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from tenacity import retry, stop_after_attempt, wait_fixed
 from pydantic import Field
+from urllib.parse import urlparse, parse_qs
 
 # Load environment variables
 load_dotenv()
@@ -37,12 +36,12 @@ Key responsibilities:
 1. Recipe Information:
    - Provide detailed ingredient lists with exact measurements from database
    - Explain cooking steps clearly and precisely
+   - Include relevant timestamps using {{timestamp:MM:SS}} format
    - Include traditional Tamil cooking techniques
    - Mention special ingredients and possible substitutes
    - Share Chef VB's special
 
 2. Response Formatting:
-   - Include relevant timestamps using {{timestamp:MM:SS}} format
    - Mark ingredients with quantities clearly
    - Highlight important tips and warnings
    - Use Tamil terms with English explanations when relevant
@@ -80,36 +79,41 @@ class CustomRetriever(BaseRetriever):
             
             conn = psycopg2.connect(self.db_url)
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Base SQL query
-                base_sql = """
+                # Modified SQL query to get top 3 results based on vector similarity
+                sql = """
                     SELECT id, chunk_id, text, url, ingredients,
-                    1 - (vector <=> %s::vector(1536)) as similarity
+                           1 - (vector <=> %s::vector(1536)) as similarity
                     FROM transcripts
                     WHERE text IS NOT NULL
+                    ORDER BY vector <=> %s::vector(1536)
+                    LIMIT 3
                 """
-                
-                if self.category != "all":
-                    sql = base_sql + " AND ingredients ILIKE %s ORDER BY vector <=> %s::vector(1536) LIMIT 3"
-                    cur.execute(sql, (vector_string, f"%{self.category}%", vector_string))
-                else:
-                    sql = base_sql + " ORDER BY vector <=> %s::vector(1536) LIMIT 3"
-                    cur.execute(sql, (vector_string, vector_string))
-                
+                cur.execute(sql, (vector_string, vector_string))
                 results = cur.fetchall()
             conn.close()
             
-            # Convert to LangChain documents
-            return [
-                Document(
-                    page_content=result['text'],
+            # Convert results to JSON-like format for LLM context
+            documents = []
+            for idx, result in enumerate(results, 1):
+                formatted_text = (
+                    f"Response {idx}:\n"
+                    f"Content: {result['text']}\n"
+                    f"URL: {result['url']}\n"
+                    f"Ingredients: {result['ingredients']}\n"
+                    f"Relevance Score: {result['similarity']:.2f}"
+                )
+                
+                documents.append(Document(
+                    page_content=formatted_text,
                     metadata={
                         'chunk_id': result['chunk_id'],
                         'url': result['url'],
                         'ingredients': result['ingredients'],
                         'similarity': result['similarity']
                     }
-                ) for result in results
-            ]
+                ))
+            
+            return documents
             
         except Exception as e:
             st.error(f"Database error: {str(e)}")
@@ -119,44 +123,43 @@ class CustomRetriever(BaseRetriever):
     async def aget_relevant_documents(self, query: str) -> List[Document]:
         return self.get_relevant_documents(query)
 
-def get_similar_recipes(ingredients: str, limit: int = 5) -> List[Dict]:
-    """Find recipes with similar ingredients"""
-    try:
-        conn = psycopg2.connect(NEON_DB_URL)
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            sql = """
-                SELECT DISTINCT ON (chunk_id) 
-                    chunk_id, text, url, ingredients
-                FROM transcripts
-                WHERE ingredients IS NOT NULL
-                AND ingredients ILIKE %s
-                LIMIT %s;
-            """
-            ingredients_filter = f"%{ingredients}%"
-            cur.execute(sql, (ingredients_filter, limit))
-            results = cur.fetchall()
-        conn.close()
-        return results
-    except Exception as e:
-        st.error(f"Error finding similar recipes: {str(e)}")
-        return []
+def extract_youtube_video_id(url: str) -> str:
+    """Extract YouTube video ID from URL"""
+    parsed_url = urlparse(url)
+    if 'youtube.com' in parsed_url.netloc:
+        return parse_qs(parsed_url.query).get('v', [None])[0]
+    elif 'youtu.be' in parsed_url.netloc:
+        return parsed_url.path[1:]
+    return None
 
-def process_ai_response(response: str) -> str:
-    """Process and format AI response with emojis and combine ingredients"""
-    # Extract ingredients from response if present
-    ingredients_section = re.search(r'📝 Ingredients:(.*?)(?=👨‍🍳|$)', response, re.DOTALL)
-    if ingredients_section:
-        # Remove the existing ingredients section
-        response = response.replace(ingredients_section.group(0), '')
+def process_ai_response(response: str, video_url: str = None) -> str:
+    """Process and format AI response with emojis and make timestamps clickable"""
+    # Extract video ID if URL is provided
+    video_id = extract_youtube_video_id(video_url) if video_url else None
     
+    # Convert timestamps to clickable links if video_id is available
+    if video_id:
+        def timestamp_to_seconds(match):
+            timestamp = match.group(1)
+            parts = timestamp.split(':')
+            return int(parts[0]) * 60 + int(parts[1])
+        
+        response = re.sub(
+            r'\{timestamp:([0-9:]+)\}',
+            lambda m: f'🕒 [{m.group(1)}](https://youtube.com/watch?v={video_id}&t={timestamp_to_seconds(m)}s)',
+            response
+        )
+    else:
+        response = re.sub(r'\{timestamp:([^\}]+)\}', r'🕒 \1', response)
+
+    # Existing replacements
     replacements = {
         r'Ingredients:': '📝 Ingredients:',
         r'Instructions:': '👨‍🍳 Instructions:',
         r'Tips?:': '💡 Tip:',
         r'Warning:': '⚠️ Warning:',
         r'Temperature:': '🌡️ Temperature:',
-        r'Cooking Time:': '⏲️ Cooking Time:',
-        r'\{timestamp:([^\}]+)\}': r'🕒 \1'
+        r'Cooking Time:': '⏲️ Cooking Time:'
     }
     
     for pattern, replacement in replacements.items():
@@ -189,7 +192,7 @@ def create_qa_chain(retriever):
     try:
         llm = ChatOpenAI(
             openai_api_key=OPENAI_API_KEY,
-            model="gpt-4o-mini",  # Updated to latest model
+            model="gpt-4o-mini",  # or your preferred model
             temperature=0
         )
 
@@ -222,6 +225,8 @@ def initialize_session_state():
         st.session_state.selected_category = "all"
     if 'retriever' not in st.session_state:
         st.session_state.retriever = CustomRetriever(NEON_DB_URL)
+    if 'current_video_id' not in st.session_state:
+        st.session_state.current_video_id = None
 
 def main():
     # Page configuration
@@ -270,16 +275,11 @@ def main():
 
     # Main chat interface
     st.markdown("### Ask about recipes, techniques, or kitchen tips! 💬")
-    user_input = st.text_input("Your question:", key="user_input")
-
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        ask_button = st.button("Ask", key="ask_button")
-    with col2:
-        clear_button = st.button("Clear Chat")
+    user_input = st.text_input("Your question:", key="user_input", value="")
 
     # Handle user input
-    if ask_button and user_input:
+    if user_input and user_input != st.session_state.get('last_input', ''):
+        st.session_state.last_input = user_input
         try:
             with st.spinner("Searching for information..."):
                 # Add user message to chat history
@@ -294,8 +294,10 @@ def main():
 
                 # Process ingredients and response
                 combined_ingredients = ""
+                video_url = None
                 if result['source_documents']:
-                    doc = result['source_documents'][0]  # Using primary source document
+                    doc = result['source_documents'][0]
+                    video_url = doc.metadata['url']
                     combined_ingredients = combine_ingredients(
                         doc.metadata['ingredients'],
                         doc.page_content
@@ -303,57 +305,32 @@ def main():
                 
                 # Add combined ingredients to the response if relevant
                 if combined_ingredients and "ingredient" in user_input.lower():
-                    processed_response = f"📝 Ingredients:\n{combined_ingredients}\n\n" + process_ai_response(result['answer'])
+                    processed_response = f"📝 Ingredients:\n{combined_ingredients}\n\n" + process_ai_response(result['answer'], video_url)
                 else:
-                    processed_response = process_ai_response(result['answer'])
+                    processed_response = process_ai_response(result['answer'], video_url)
 
-                # Process and add AI response
+                # Add AI response to chat history
                 st.session_state.chat_history.append(("assistant", processed_response))
 
-            # Display chat history
+            # Display chat history with markdown enabled for clickable links
             for speaker, message in st.session_state.chat_history:
                 if speaker == "user":
                     st.markdown(f"**You:** {message}")
                 else:
-                    st.markdown(f"**Chef VB Assistant:** {message}")
+                    st.markdown(f"**Chef VB Assistant:** {message}", unsafe_allow_html=True)
 
             # Display relevant video sections
             if result['source_documents']:
-                st.markdown("### 📺 Related Video Sections")
-                for doc in result['source_documents']:
-                    with st.expander(f"Video Section - {doc.metadata['chunk_id']}"):
-                        if doc.metadata['url']:
-                            st.video(doc.metadata['url'])
-                        st.markdown("### 📝 Transcript")
-                        st.write(doc.page_content)
-                        if doc.metadata['ingredients']:
-                            st.markdown("### 📋 Ingredients Mentioned")
-                            st.write(doc.metadata['ingredients'])
-                        st.markdown(f"Relevance Score: {doc.metadata['similarity']:.2%}")
+                st.markdown("### 📺 Related Video")
+                if result['source_documents'][0].metadata['url']:
+                    st.video(result['source_documents'][0].metadata['url'])
 
-                # Find and display similar recipes
-                if doc.metadata['ingredients']:
-                    similar_recipes = get_similar_recipes(doc.metadata['ingredients'])
-                    if similar_recipes:
-                        st.markdown("### 👨‍🍳 Similar Recipes You Might Like")
-                        for recipe in similar_recipes:
-                            with st.expander(f"View Recipe from {recipe['chunk_id']}"):
-                                if recipe['url']:
-                                    st.video(recipe['url'])
-                                st.markdown("### 📝 Recipe Details")
-                                st.write(recipe['text'])
-                                if recipe['ingredients']:
-                                    st.markdown("### 📋 Ingredients")
-                                    st.write(recipe['ingredients'])
+            # Clear the input box after processing
+            st.session_state.user_input = ""
 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
             print(f"Full error details: {str(e)}")
-
-    # Handle clear chat
-    if clear_button:
-        st.session_state.chat_history = []
-        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
