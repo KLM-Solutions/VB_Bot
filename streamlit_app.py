@@ -11,21 +11,15 @@ from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, H
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from tenacity import retry, stop_after_attempt, wait_fixed
-from pydantic import Field, BaseModel, model_validator
+from pydantic import Field
 from urllib.parse import urlparse, parse_qs
 
 # Load environment variables
 load_dotenv()
 
 # Configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-NEON_DB_URL = os.getenv("NEON_DB_URL")
-
-# Streamlit secrets
-if not OPENAI_API_KEY:
-    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-if not NEON_DB_URL:
-    NEON_DB_URL = st.secrets["NEON_DB_URL"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+NEON_DB_URL = st.secrets["NEON_DB_URL"]
 
 # Categories for content filtering
 CONTENT_CATEGORIES = {
@@ -66,21 +60,19 @@ Key responsibilities:
 
 Always maintain the authenticity of Chef VB's teaching style while making information accessible to home cooks."""
 
-class CustomRetriever(BaseRetriever, BaseModel):
+class CustomRetriever(BaseRetriever):
     """Custom retriever for vector similarity search"""
     
     db_url: str = Field(description="Database URL for connection")
     embeddings: OpenAIEmbeddings = Field(default_factory=lambda: OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY))
     category: str = Field(default="all", description="Content category for filtering")
 
-    @model_validator(mode='after')
-    def initialize_embeddings(self):
-        """Initialize embeddings after model creation"""
-        self.embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-        return self
-
     class Config:
         arbitrary_types_allowed = True
+
+    def __init__(self, db_url: str, category: str = "all"):
+        super().__init__(db_url=db_url, category=category)
+        self.embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
     def format_vector_for_postgres(self, embedding):
         """Format embeddings for PostgreSQL"""
