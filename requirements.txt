@@ -1,5 +1,6 @@
 streamlit
 python-dotenv
+langchain
 langchain-openai
 numpy
 psycopg2-binary
