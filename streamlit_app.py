@@ -420,7 +420,7 @@ def main():
                     main_response, _, _ = parse_llm_response(relevance_response['answer'])
                     st.session_state.chat_history.append(("user", user_input))
                     st.session_state.chat_history.append(("assistant", main_response))
-                    st.experimental_rerun()
+                    st.rerun()
                     return
 
                 # Continue with normal QA chain if relevant
@@ -445,7 +445,7 @@ def main():
                 st.session_state.chat_history.append(("assistant", processed_response))
 
                 # Force a rerun to update the chat display
-                st.experimental_rerun()
+                st.rerun()
 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
