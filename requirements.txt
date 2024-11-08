@@ -1,17 +1,7 @@
+streamlit
+python-dotenv
 langchain-openai
 numpy
-openai
 psycopg2-binary
-pydantic
-python-dotenv
-streamlit
 tenacity
-typing-extensions
-urllib3
-python-dotenv
-langchain
-neon-db
-# Optional but recommended for development
-black
-flake8
-pytest
+pydantic
