@@ -1,8 +1,8 @@
 streamlit
 python-dotenv
-langchain
 langchain-openai
-numpy
+langchain
 psycopg2-binary
 tenacity
 pydantic
+numpy
