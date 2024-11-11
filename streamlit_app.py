@@ -17,6 +17,11 @@ from urllib.parse import urlparse, parse_qs
 # Load environment variables
 load_dotenv()
 
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_PROJECT"] = "vb-assistant"
+
 # Configuration
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 NEON_DB_URL = st.secrets["NEON_DB_URL"]
@@ -221,7 +226,7 @@ def create_qa_chain(retriever):
             llm=llm,
             retriever=retriever,
             combine_docs_chain_kwargs={"prompt": prompt},
-            return_source_documents=False
+            return_source_documents=True
         )
     except Exception as e:
         st.error(f"Error creating QA chain: {str(e)}")
@@ -330,9 +335,10 @@ def parse_llm_response(response: str) -> tuple:
             main_response = (
                 f"{main_response}\n\n"
                 f"📺 **Watch the full recipe video here:**\n"
-                f"<iframe width='400' height='225' "
-                f"src='https://www.youtube.com/embed/{video_id}' "
-                f"frameborder='0' allowfullscreen></iframe>"
+                f'<div class="stVideo">'  # This div will be hidden in the interface
+                f'<iframe src="https://www.youtube.com/embed/{video_id}" '
+                f'width="400" height="225" frameborder="0" allowfullscreen></iframe>'
+                f'</div>'
             )
 
     return main_response, url, ingredients
@@ -386,7 +392,7 @@ def main():
     st.markdown("### Ask about recipes, techniques, or kitchen tips! 💬")
     user_input = st.text_input("Your question:", key="user_input")
 
-    # Display chat history with markdown enabled for clickable links
+    # Display chat history with markdown and HTML enabled
     for speaker, message in st.session_state.chat_history:
         with st.container():
             if speaker == "user":
@@ -394,10 +400,11 @@ def main():
             else:
                 st.markdown(f"**Chef VB Assistant:** {message}", unsafe_allow_html=True)
 
-    # Handle user input
+    # Move spinner here, after chat history display
     if user_input and user_input != st.session_state.get('last_input', ''):
         st.session_state.last_input = user_input
         try:
+            # Place spinner after chat history
             with st.spinner("Searching for information..."):
                 # Create LLM instance for relevance check
                 llm = ChatOpenAI(
@@ -430,16 +437,12 @@ def main():
                     "chat_history": [(q, a) for q, a in st.session_state.chat_history[:-1]]
                 })
 
-                # Process response components
+                # Parse the response
                 main_response, video_url, ingredients = parse_llm_response(result['answer'])
                 
-                # Add ingredients to the response if they exist and are relevant
-                if ingredients and "ingredient" in user_input.lower():
-                    main_response = f"📝 Ingredients:\n{ingredients}\n\n{main_response}"
-                
-                # Format final response with enhanced timestamp handling
+                # Process the response with emojis and clickable timestamps
                 processed_response = process_ai_response(main_response, video_url)
-                
+
                 # Add to chat history
                 st.session_state.chat_history.append(("user", user_input))
                 st.session_state.chat_history.append(("assistant", processed_response))
