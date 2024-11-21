@@ -3,6 +3,7 @@ import re
 import numpy as np
 import streamlit as st
 from typing import List, Dict
+from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.schema import Document, BaseRetriever
@@ -13,18 +14,17 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from pydantic import Field
 from urllib.parse import urlparse, parse_qs
 
-# Remove these lines
-# load_dotenv()
+# Load environment variables
+load_dotenv()
 
-# Replace environment variable settings with st.secrets
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_PROJECT"] = "vb-assistant"
 
-# Replace configuration variables
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-NEON_DB_URL = st.secrets["NEON_DB_URL"]
+# Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+NEON_DB_URL = os.getenv("NEON_DB_URL")
 
 # Categories for content filtering
 CONTENT_CATEGORIES = {
@@ -401,6 +401,24 @@ def parse_llm_response(response: str) -> tuple:
 
     return main_response, url, ingredients
 
+def format_chat_history(chat_history):
+    """Format chat history for LLM consumption"""
+    if not chat_history:
+        return []
+    
+    # Convert to list of tuples format that LangChain expects
+    formatted_history = []
+    for role, content in chat_history[-6:]:  # Get last 3 exchanges
+        # Create tuple pairs that LangChain expects (human message, ai message)
+        if role == "user":
+            current_exchange = [content]
+        elif role == "assistant" and current_exchange:
+            current_exchange.append(content)
+            formatted_history.append(tuple(current_exchange))
+            current_exchange = []
+    
+    return formatted_history
+
 def main():
     # Page configuration
     st.set_page_config(
@@ -448,72 +466,42 @@ def main():
 
     # Main chat interface
     st.markdown("### Ask about recipes, techniques, or kitchen tips! 💬")
-    user_input = st.text_input("Your question:", key="user_input")
+    user_input = st.chat_input("Ask about recipes")
 
-    # Display chat history with markdown and HTML enabled
-    for speaker, message in st.session_state.chat_history:
-        with st.container():
-            if speaker == "user":
-                st.markdown(f"**You:** {message}")
-            else:
-                st.markdown(f"**Chef VB Assistant:** {message}", unsafe_allow_html=True)
-
-    # Move spinner here, after chat history display
-    if user_input and user_input != st.session_state.get('last_input', ''):
-        st.session_state.last_input = user_input
-        try:
-            # Place spinner after chat history
-            with st.spinner("Searching for information..."):
-                # Create LLM instance for relevance check
-                llm = ChatOpenAI(
-                    openai_api_key=OPENAI_API_KEY,
-                    model="gpt-4o-mini",
-                    temperature=0
-                )
+    if user_input:
+        # Check if this is a new input
+        if user_input != st.session_state.get('last_input'):
+            st.session_state.last_input = user_input
+            
+            try:
+                # Format chat history for LLM context
+                formatted_history = format_chat_history(st.session_state.chat_history)
                 
-                # Check relevance first
-                relevance_prompt = relevance_check_prompt(
-                    user_input, 
-                    [(q, a) for q, a in st.session_state.chat_history]
-                )
-                relevance_result = llm.predict(relevance_prompt)
-                
-                # Handle relevance response
-                relevance_response = handle_relevance_response(relevance_result, llm)
-                if relevance_response:
-                    # Process the response similar to regular responses
-                    main_response, _, _ = parse_llm_response(relevance_response['answer'])
-                    st.session_state.chat_history.append(("user", user_input))
-                    st.session_state.chat_history.append(("assistant", main_response))
-                    st.rerun()
-                    return
-
-                # Continue with normal QA chain if relevant
+                # Get response from LLM
                 qa_chain = create_qa_chain(st.session_state.retriever)
                 result = qa_chain({
                     "question": user_input,
-                    "chat_history": [(q, a) for q, a in st.session_state.chat_history[:-1]]
+                    "chat_history": formatted_history
                 })
                 
-                # Add debug logging
-                print("QA Chain Result:", result)  # Debug output
-                
-                # Parse the response
-                main_response, video_url, ingredients = parse_llm_response(result['answer'])
-                
-                # Process the response with emojis and clickable timestamps
-                processed_response = process_ai_response(main_response, video_url)
-
-                # Add to chat history
+                # Store raw response and query in chat history
                 st.session_state.chat_history.append(("user", user_input))
-                st.session_state.chat_history.append(("assistant", processed_response))
+                st.session_state.chat_history.append(("assistant", result['answer']))
 
-                # Force a rerun to update the chat display
-                st.rerun()
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
+                print(f"Full error details: {str(e)}")
 
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
-            print(f"Full error details: {str(e)}")
+    # Display chat history (outside the if condition)
+    for role, content in st.session_state.chat_history:
+        with st.container():
+            if role == "user":
+                st.markdown(f"**You:** {content}")
+            else:
+                # Process the raw response for display
+                main_response, video_url, ingredients = parse_llm_response(content)
+                processed_response = process_ai_response(main_response, video_url)
+                st.markdown(f"**Chef VB Assistant:** {processed_response}", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
