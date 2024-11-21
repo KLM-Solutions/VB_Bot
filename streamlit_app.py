@@ -3,7 +3,6 @@ import re
 import numpy as np
 import streamlit as st
 from typing import List, Dict
-from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.schema import Document, BaseRetriever
@@ -14,15 +13,16 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from pydantic import Field
 from urllib.parse import urlparse, parse_qs
 
-# Load environment variables
-load_dotenv()
+# Remove these lines
+# load_dotenv()
 
+# Replace environment variable settings with st.secrets
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_PROJECT"] = "vb-assistant"
 
-# Configuration
+# Replace configuration variables
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 NEON_DB_URL = st.secrets["NEON_DB_URL"]
 
@@ -48,7 +48,6 @@ Key responsibilities:
      * Explain cooking steps clearly and precisely
      * Include relevant timestamps using {{timestamp:MM:SS}} format, for each step or important point
      * Include traditional Tamil cooking techniques
-     * Mention special ingredients and possible substitutes
      * Share Chef VB's special tips only from the database
      * Include the video mini player in the response
 
@@ -56,8 +55,34 @@ Key responsibilities:
    - Mark ingredients with quantities clearly
    - Highlight important tips and warnings
    - Use Tamil terms with English explanations when relevant
-  
-3. Special Notes:
+   
+3. Health Considerations:
+   - For ANY recipe, when health-related questions or concerns are mentioned:
+     * First provide the original recipe as is from the database with miniplayer
+     * Then add a "Health Adaptations" section that:
+       - Analyzes ALL ingredients in the recipe for potential health impacts
+       - Provides multiple adaptation options based on different health needs:
+         • Diabetes-friendly modifications
+         • Heart-healthy alternatives
+         • Low-sodium versions
+         • Gluten-free options (if applicable)
+         • Low-fat adaptations
+       - For EACH ingredient that could impact health:
+         • List the original measurement
+         • Provide specific alternatives with exact proportions
+         • Explain the health benefit of the substitution
+         • Suggest cooking method modifications if needed
+       - Include any necessary changes to cooking techniques
+       - Note how modifications might affect taste/texture
+   - Always include a detailed health impact analysis for:
+     * Oils and fats
+     * Sweeteners
+     * Refined ingredients
+     * High-sodium components
+     * Allergen-containing ingredients
+   - Include a comprehensive disclaimer about consulting healthcare providers
+
+4. Special Notes:
    - Refer to the chef as "Chef VB" or "Chef Venkatesh Bhat"
    - Include festival-specific details when relevant
    - Note restaurant-style adaptations for home cooking
@@ -143,40 +168,44 @@ def extract_youtube_video_id(url: str) -> str:
 
 def process_ai_response(response: str, video_url: str = None) -> str:
     """Process and format AI response with emojis and make timestamps clickable"""
+    # Existing timestamp and emoji processing
+    processed_response = response
+    
     # Extract video ID if URL is provided
     video_id = extract_youtube_video_id(video_url) if video_url else None
     
-    # Convert timestamps to clickable links if video_id is available
+    # Process timestamps (existing code)
     if video_id:
         def timestamp_to_seconds(match):
             timestamp = match.group(1)
             parts = timestamp.split(':')
             return int(parts[0]) * 60 + int(parts[1])
         
-        # Simply show MM:SS with clock emoji, but make it clickable
-        response = re.sub(
+        processed_response = re.sub(
             r'\{timestamp:([0-9:]+)\}',
             lambda m: f'[🕒 {m.group(1)}](https://youtube.com/watch?v={video_id}&t={timestamp_to_seconds(m)}s)',
-            response
+            processed_response
         )
     else:
-        # If no video URL, just show the timestamp with clock emoji
-        response = re.sub(r'\{timestamp:([^\}]+)\}', r'🕒 \1', response)
+        processed_response = re.sub(r'\{timestamp:([^\}]+)\}', r'🕒 \1', processed_response)
 
-    # Add emojis to section headers
+    # Add emojis to section headers (existing code plus new health-related headers)
     replacements = {
         r'Ingredients:': '📝 Ingredients:',
         r'Instructions:': '👨‍🍳 Instructions:',
         r'Tips?:': '💡 Tip:',
         r'Warning:': '⚠️ Warning:',
         r'Temperature:': '🌡️ Temperature:',
-        r'Cooking Time:': '⏲️ Cooking Time:'
+        r'Cooking Time:': '⏲️ Cooking Time:',
+        r'Health Adaptations:': '🌿 Health Adaptations:',
+        r'Health Note:': '⚕️ Health Note:',
+        r'Dietary Alternatives:': '🥗 Dietary Alternatives:'
     }
     
     for pattern, replacement in replacements.items():
-        response = re.sub(pattern, replacement, response)
+        processed_response = re.sub(pattern, replacement, processed_response)
 
-    return response
+    return processed_response
 
 def combine_ingredients(db_ingredients: str, content_text: str) -> str:
     """Combine ingredients from database and content"""
@@ -308,7 +337,6 @@ def handle_relevance_response(relevance_response: str, llm) -> dict:
 
 def parse_llm_response(response: str) -> tuple:
     """Parse the LLM response to extract URL and ingredients"""
-    # Default values
     url = None
     ingredients = None
     main_response = response
@@ -325,21 +353,51 @@ def parse_llm_response(response: str) -> tuple:
         ingredients = ingredients_match.group(1).strip()
         main_response = main_response.replace(ingredients_match.group(0), '')
 
-    # Clean up any trailing whitespace or newlines
     main_response = main_response.strip()
 
-    # Add video player section at the end if URL exists
+    # Split response into recipe and health sections if health adaptations exist
+    recipe_section = main_response
+    health_section = None
+    
+    health_section_match = re.search(r'(Health Adaptations:.*?)(?=\n\n|$)', main_response, re.DOTALL)
+    if health_section_match:
+        health_section = health_section_match.group(1)
+        recipe_section = main_response.replace(health_section, '').strip()
+
+    # Process timestamps in recipe section
     if url:
+        recipe_section = process_ai_response(recipe_section, url)
         video_id = extract_youtube_video_id(url)
         if video_id:
-            main_response = (
-                f"{main_response}\n\n"
-                f"📺 **Watch the full recipe video here:**\n"
-                f'<div class="stVideo">'  # This div will be hidden in the interface
+            # Move video section before any content processing
+            video_section = (
+                f"\n\n📺 **Watch the recipe video:**\n"
+                f'<div class="stVideo" style="margin: 20px 0;">'
                 f'<iframe src="https://www.youtube.com/embed/{video_id}" '
                 f'width="400" height="225" frameborder="0" allowfullscreen></iframe>'
-                f'</div>'
+                f'</div>\n\n'
             )
+            # Add video section at the beginning of the response
+            recipe_section = video_section + recipe_section
+
+    # Process health section if it exists
+    if health_section:
+        if url:
+            health_section = process_ai_response(health_section, url)
+        health_card = (
+            f"---\n"
+            f"<div style='background-color: #f0f8ff; padding: 20px; border-radius: 10px; "
+            f"border: 1px solid #add8e6; margin: 20px 0;'>\n"
+            f"{health_section}\n"
+            f"<p style='font-style: italic; margin-bottom: 0; font-size: 0.9em;'>"
+            f"⚕️ Note: These are general suggestions. Please consult your healthcare provider for personalized advice.</p>\n"
+            f"</div>\n"
+            f"---"
+        )
+        # Combine recipe and health sections
+        main_response = f"{recipe_section}\n\n{health_card}"
+    else:
+        main_response = recipe_section
 
     return main_response, url, ingredients
 
@@ -436,7 +494,10 @@ def main():
                     "question": user_input,
                     "chat_history": [(q, a) for q, a in st.session_state.chat_history[:-1]]
                 })
-
+                
+                # Add debug logging
+                print("QA Chain Result:", result)  # Debug output
+                
                 # Parse the response
                 main_response, video_url, ingredients = parse_llm_response(result['answer'])
                 
