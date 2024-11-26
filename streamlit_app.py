@@ -1,3 +1,5 @@
+#upto second point
+
 import os
 import re
 import numpy as np
@@ -355,21 +357,20 @@ def parse_llm_response(response: str) -> tuple:
 
     main_response = main_response.strip()
 
-    # Split response into recipe and health sections if health adaptations exist
-    recipe_section = main_response
-    health_section = None
+    # Extract all health-related content and move it to the end
+    health_pattern = r'(?:🌿 Health Adaptations:|⚕️ Health Note:|🥗 Dietary Alternatives:).*?(?=\n\n(?:[^🌿⚕️🥗]|$)|$)'
+    health_sections = re.findall(health_pattern, main_response, re.DOTALL)
     
-    health_section_match = re.search(r'(Health Adaptations:.*?)(?=\n\n|$)', main_response, re.DOTALL)
-    if health_section_match:
-        health_section = health_section_match.group(1)
-        recipe_section = main_response.replace(health_section, '').strip()
-
+    # Remove health sections from main content
+    recipe_section = main_response
+    for section in health_sections:
+        recipe_section = recipe_section.replace(section, '').strip()
+    
     # Process timestamps in recipe section
     if url:
         recipe_section = process_ai_response(recipe_section, url)
         video_id = extract_youtube_video_id(url)
         if video_id:
-            # Move video section before any content processing
             video_section = (
                 f"\n\n📺 **Watch the recipe video:**\n"
                 f'<div class="stVideo" style="margin: 20px 0;">'
@@ -377,25 +378,14 @@ def parse_llm_response(response: str) -> tuple:
                 f'width="400" height="225" frameborder="0" allowfullscreen></iframe>'
                 f'</div>\n\n'
             )
-            # Add video section at the beginning of the response
             recipe_section = video_section + recipe_section
 
-    # Process health section if it exists
-    if health_section:
+    # Combine all health sections at the end
+    if health_sections:
+        health_content = "\n\n".join(health_sections)
         if url:
-            health_section = process_ai_response(health_section, url)
-        health_card = (
-            f"---\n"
-            f"<div style='background-color: #f0f8ff; padding: 20px; border-radius: 10px; "
-            f"border: 1px solid #add8e6; margin: 20px 0;'>\n"
-            f"{health_section}\n"
-            f"<p style='font-style: italic; margin-bottom: 0; font-size: 0.9em;'>"
-            f"⚕️ Note: These are general suggestions. Please consult your healthcare provider for personalized advice.</p>\n"
-            f"</div>\n"
-            f"---"
-        )
-        # Combine recipe and health sections
-        main_response = f"{recipe_section}\n\n{health_card}"
+            health_content = process_ai_response(health_content, url)
+        main_response = f"{recipe_section}\n\n{health_content}"
     else:
         main_response = recipe_section
 
