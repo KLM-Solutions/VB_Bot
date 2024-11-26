@@ -6,3 +6,10 @@ psycopg2-binary
 tenacity
 pydantic
 numpy
+typing-extensions
+urllib3
+
+
+
+
+
