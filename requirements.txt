@@ -8,7 +8,7 @@ pydantic
 numpy
 typing-extensions
 urllib3
-
+openai
 
 
 
