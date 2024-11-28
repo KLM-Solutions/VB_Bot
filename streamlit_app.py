@@ -1,10 +1,8 @@
-
 import os
 import re
 import numpy as np
 import streamlit as st
 from typing import List, Dict
-from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.schema import Document, BaseRetriever
@@ -15,17 +13,15 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from pydantic import Field
 from urllib.parse import urlparse, parse_qs
 
-# Load environment variables
-load_dotenv()
 
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_PROJECT"] = "vb-assistant"
 
 # Configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-NEON_DB_URL = os.getenv("NEON_DB_URL")
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+NEON_DB_URL = st.secrets["NEON_DB_URL"]
 
 # Categories for content filtering
 CONTENT_CATEGORIES = {
