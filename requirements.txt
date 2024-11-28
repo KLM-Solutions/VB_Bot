@@ -1,14 +1,10 @@
 streamlit
 python-dotenv
 langchain-openai
-langchain
+numpy
 psycopg2-binary
 tenacity
 pydantic
-numpy
-typing-extensions
+langchain
 urllib3
-openai
-
-
-
+typing-extensions
